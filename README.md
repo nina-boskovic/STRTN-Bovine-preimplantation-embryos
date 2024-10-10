@@ -1,1 +1,1 @@
-# STRTN-Bovine-preimplantation-embryos
+# STRTN: Bovine preimplantation embryos
