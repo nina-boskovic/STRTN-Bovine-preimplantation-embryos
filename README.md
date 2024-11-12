@@ -27,7 +27,9 @@ Mammalian preimplantation embryo development is a complex sequence of events. Th
 The raw data (BCL files) are available at Zenodo: DOI 10.5281/zenodo.13384651 and FASTQ files are available in EMBL-EBI BioStudies with accession number S-BSST1680. 
 Raw gene count matrix and fluctated raw caunt matrix has been added to the folder Data in this GitHub 
 
-**Main Figures**
+**Figures**
+
+All figures (except those not prepared using R) in the manuscript can be reproduced from the R scripts within this repository.
 
 
 
