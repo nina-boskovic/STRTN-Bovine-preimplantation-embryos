@@ -1,24 +1,22 @@
 # Oxygen level alters energy metabolism in bovine preimplantation embryos
 
-**Nina Boskovic 1,2*, Marilin Ivask 3,4, Gamze Yazgeldi Gunaydin 5,6, Barış Yaşar 1,7, Shintaro Katayama 1,5,6, Andres Salumets 8,9,10, Tõnis Org 7,11, Ants Kurg 7, Karolina Lundin2, Timo Tuuri 2, Carsten O. Daub 1,12,  Juha Kere 1,5,6** 
+**Nina Boskovic 1,2, Marilin Ivask 3,4, Gamze Yazgeldi Gunaydin 5,6, Barış Yaşar 1,7, Shintaro Katayama 1,5,6, Andres Salumets 8,9,10, Tõnis Org 7,11, Ants Kurg 7, Karolina Lundin2, Timo Tuuri 2, Carsten O. Daub 1,12,Juha Kere 1,5,6** 
 
-1 Department of Medicine Huddinge, Karolinska Institutet, 14183 Huddinge, Sweden 
-2 Department of Obstetrics and Gynecology, University of Helsinki, 00290 Helsinki, Finland 
-3 Department of Veterinary Medicine, Faculty of Animal Sciences and Food Engineering, University of São Paulo, 
-  13635000 Pirassununga, Brazil.
-4 Chair of Animal Breeding and Biotechnology, Institute of Veterinary Medicine and Animal Sciences, 
-  Estonian University of Life Sciences,51014 Tartu, Estonia
-5 Folkhälsan Research Center, 00290 Helsinki, Finland 
-6 Stem Cells and Metabolism Research Program, University of Helsinki, 00290 Helsinki, Finland. 
-7 Department of Biotechnology, Institute of Molecular and Cell Biology, University of Tartu, 51010 Tartu, Estonia 
+1 Department of Medicine Huddinge, Karolinska Institutet  
+2 Department of Obstetrics and Gynecology, University of Helsinki  
+3 Department of Veterinary Medicine, Faculty of Animal Sciences and Food Engineering, University of São Paulo   
+4 Chair of Animal Breeding and Biotechnology, Institute of Veterinary Medicine and Animal Sciences, Estonian University of Life Sciences
+5 Folkhälsan Research Center    
+6 Stem Cells and Metabolism Research Program, University of Helsinki   
+7 Department of Biotechnology, Institute of Molecular and Cell Biology, University of Tartu   
 8 Division of Obstetrics and Gynecology, Department of Clinical Science, Intervention and Technology, 
- Karolinska Institutet and Karolinska University Hospital, SE-141 52 Huddinge, Sweden
-9 Celvia CC, Competence Centre on Health Technologies, 50411 Tartu, Estonia
-10 Department of Obstetrics and Gynecology, Institute of Clinical Medicine, University of Tartu,
-   50406 Tartu, Estonia
-11 Centre for Genomics, Evolution and Medicine, Institute of Genomics, University of Tartu, 51014 Tartu, Estonia 
-12 Science for Life Laboratory, 17165, Solna, Sweden
-*Correspondence: nina.boskovic@ki.se
+ Karolinska Institutet and Karolinska University Hospital   
+ 9 Celvia CC, Competence Centre on Health Technologies    
+ 10 Department of Obstetrics and Gynecology, Institute of Clinical Medicine, University of Tartu   
+ 11 Centre for Genomics, Evolution and Medicine, Institute of Genomics, University of Tartu   
+ 12 Science for Life Laboratory   
+ *Correspondence: nina.boskovic@ki.se  
+
 
 **ABSTRACT** 
 
