@@ -1,0 +1,65 @@
+---
+title: "QC script (suppl. fig 1)"
+author: "Nina Boskovic"
+date: "2024-06-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+library(ggbeeswarm)
+library(forcats)
+library(tidyverse)
+library(data.table)
+library(gridExtra)
+
+QC <- read.delim("STRTN_BOVINE_2ndO2LIB-QC.txt", header= TRUE, check.names = FALSE)
+rownames(QC)<- QC$Barcode
+barcode_stages <- read.table("metadata.txt")
+genomic_idx <- match(rownames(barcode_stages), rownames(QC))
+QC<- QC[genomic_idx, ]
+fulldataQC <- merge(QC, barcode_stages, by= "Barcode") 
+
+fulldataQC<- fulldataQC %>% mutate(Developmental_stages=fct_relevel(Developmental_stages, 'oocyte','Zygote', '4cell', '8cell', '16cell', 'blastocyst'))
+fulldataQC<- fulldataQC %>% mutate(Condition=fct_relevel(Condition, 'hypoxia','hypoxia/ultrahypoxia', 'normoxia', 'ntc'))
+mapped_reads1 <- ggplot(fulldataQC, aes(x=Developmental_stages, y=Mapped_reads))+
+  geom_beeswarm(data=fulldataQC,aes(col=Condition))+
+  labs(title="Mapped reads", y= "Mapped reads", x="Developmental stages") 
+
+spikein_reads <- ggplot(fulldataQC, aes(x=Developmental_stages, y=log10(Spikein_reads)))+
+  geom_beeswarm(data=fulldataQC,aes(col=Condition))+
+  labs(title="Spikein reads", y= "log10(Spikein reads)", x= "Developmental stages")
+
+spikein_5 <- ggplot(fulldataQC, aes(x=Developmental_stages, y=(`Spikein-5end_rate`)))+
+  geom_beeswarm(data=fulldataQC,aes(col=Condition))+
+  labs(title="Spikein 5' end rate", y= "Spikin- 5' end rate (%) ", x= "Developmental stages")
+
+mapped_rate <- ggplot(fulldataQC, aes(x=Developmental_stages, y= Mapped_rate))+
+  geom_beeswarm(data=fulldataQC,aes(col=Condition))+
+  labs(title="Mapped rate", y= "Mapped reads/Total reads (%)", x= "Developmental stages")
+
+fulldataQC<- fulldataQC %>%
+  mutate(mapped_spike= (Mapped_reads-Spikein_reads)/Spikein_reads)
+
+Mapped_spike <- ggplot(fulldataQC, aes(x=Developmental_stages, y= mapped_spike))+
+  geom_beeswarm(data=fulldataQC,aes(col=Condition))+
+  labs(title="Mapped/Spike", y= "(mapped-spikein)/spikein", x= "Developmental stages")
+
+Coding5end <- ggplot(fulldataQC, aes(x=Developmental_stages, y= `Coding-5end_rate`))+
+  geom_beeswarm(data=fulldataQC,aes(col=Condition))+
+  labs(title="Coding 5' end", y= "Coding 5'end (%)", x= "Developmental stages")
+
+combined_QC<- grid.arrange(mapped_reads1, spikein_reads, spikein_5, mapped_rate, Mapped_spike, Coding5end, ncol=3, nrow=2)
+ggsave(combined_QC, filename="combinedQC.pdf", width = 28, height = 19)
+
+sessionInfo()
+
+```
+
