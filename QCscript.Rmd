@@ -1,5 +1,5 @@
 ---
-title: "QC script (suppl. fig 1)"
+title: "QC script for supplementary figure 1"
 author: "Nina Boskovic"
 date: "2024-06-25"
 output: html_document
