@@ -1,0 +1,585 @@
+---
+title: "Main analysis"
+author: "Nina Boskovic"
+date: "2024-06-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Load packages
+```{r}
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+library(ggbeeswarm)
+library(forcats)
+library(tidyverse)
+library(data.table)
+library(gridExtra)
+library(Seurat)
+library(SeuratObject)
+library(DESeq2)
+library(ggrepel)
+library(svglite)
+library(clusterProfiler)
+library(AnnotationDbi)
+library(org.Bt.eg.db)
+library(RColorBrewer)
+library(ReactomePA)
+```
+
+```{r}
+fluctuated_data<-read.delim("fluctuated_data.txt", header= TRUE, check.names = FALSE)
+metadata<- read.table("metadataUHO.txt")
+fluctuated_data <- fluctuated_data[, -c(13, 26, 38, 41)]
+metadata<- metadata[-c(13,26, 38,41),]
+
+strt.seurat.obj <- CreateSeuratObject(counts = fluctuated_data, project = "STRT", min.cells = 10, min.features = 2000 )
+strt.seurat.obj@meta.data <- metadata
+desired_order<- c("oocyte", "Zygote", "4cell", "8cell", "16cell", "blastocyst")
+strt.seurat.obj$Developmental_stages<- factor(strt.seurat.obj$Developmental_stages, levels = desired_order)
+```
+
+# Normalise data using ERCC spike ins
+```{r, message=FALSE}
+strt.seurat.obj<- NormalizeData(strt.seurat.obj, normalization.method = "LogNormalize", scale.factor = 10000)
+reads.p1<- fluctuated_data + 1 
+reads.p1.spikes<- colSums(reads.p1[1:78, ])
+strt.seurat.obj[["RNA"]]@data <- as(as.matrix(log(reads.p1/rep(reads.p1.spikes, each=nrow(reads.p1)))), "dgCMatrix")
+all.genes <- row.names(strt.seurat.obj)
+strt.seurat.obj <- ScaleData(strt.seurat.obj, features = all.genes)
+```
+
+# Supplimentary figure 2 and main figure 2
+
+```{r}
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# PCA plot, supplementary figure 2
+strt.seurat.obj <- RunPCA(strt.seurat.obj, features = all.genes, npcs = 33)
+pcaloadings<- VizDimLoadings(strt.seurat.obj, dims = 1:2, reduction = "pca")
+pcaplot<-DimPlot(strt.seurat.obj, reduction = "pca", cols = c25, group.by = "Developmental_stages", shape.by = "Condition", label = T, label.size = 4, pt.size=3)+
+  ggtitle("2nd library")
+
+ggsave(pcaplot, filename= "pcaplot(no 16cHO(16)and4cUHO(38)and36.pdf", width = 10, height = 10)
+ggsave(pcaloadings, filename= "pcaloadings.pdf", height = 10, width = 10)
+
+#UMAP plot and violin plots for chosen genes, main figure 2
+
+strt.seurat.obj <- RunUMAP(strt.seurat.obj, dims = 1:15, verbose = F)
+umaptplot<- DimPlot(strt.seurat.obj,label.size = 4, cols = c25, group.by = "Developmental_stages", shape.by = "Condition", repel = T, label = T, pt.size = 4) +
+  ggtitle("2nd library")
+ggsave(umaptplot, filename= "UMAPplot.pdf", width = 15, height = 10)
+
+metadata$Developmental_stages <- ifelse(metadata$Developmental_stages == "Zygote", "zygote", metadata$Developmental_stages)
+strt.seurat.obj@meta.data[["orig.ident"]] <- metadata[,3]
+
+strt.seurat.obj$orig.ident <-  factor(strt.seurat.obj$orig.ident, levels = c('oocyte','zygote', '4cell', '8cell', '16cell', 'blastocyst'))
+
+violin1<-VlnPlot(object = strt.seurat.obj, features = c("ACTB", "ACTG1", "ACTG2", "TUBA1B", "TUBA1C", "NANOG", "POU5F1", "GDF9", "SLC34A2"), group.by = "orig.ident", cols = c25, ncol = 3) + theme(legend.position = 'none')
+
+ggsave(violin1, filename= "testviolin.pdf", height = 10, width = 10)
+
+```
+
+# Differential expression analysis
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = fluctuated_data, 
+                              colData = metadata, 
+                              design = ~ Stage)
+dds <- estimateSizeFactors(dds, controlGenes=1:77) #Using ERCC spike-ins to normalize the expression 
+
+
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+levels(dds$Stage)
+dds1 <- DESeq(dds)
+```
+
+# Hypoxia 
+
+```{r}
+
+hypoxia_8c_vs_zygote <- as.data.frame(results(dds1, contrast=c("Stage", "8cHO", "zHO")))
+hypoxia_16c_vs_zygote <- as.data.frame(results(dds1, contrast=c("Stage", "16cHO", "zHO")))
+hypoxia_blas_vs_16c <- as.data.frame(results(dds1, contrast=c("Stage", "bHO", "16cHO")))
+
+hypoxia_8c_vs_zygote <- subset(hypoxia_8c_vs_zygote, !is.na(padj) )
+hypoxia_16c_vs_zygote <- subset(hypoxia_16c_vs_zygote, !is.na(padj) )
+hypoxia_blas_vs_16c <- subset(hypoxia_blas_vs_16c, !is.na(padj))
+
+#volcano plot Main figure 3; 8-cell vs zygote 
+
+hypoxia_8c_vs_zygotevol0.05 <- hypoxia_8c_vs_zygote%>% mutate(gene_type = case_when( log2FoldChange <= -1 & padj < 0.05 ~ "down", log2FoldChange >= 1 & padj < 0.05 ~ "up", TRUE ~ "ns"))
+hypoxia_8c_vs_zygotevol0.05$Symbol<- rownames(hypoxia_8c_vs_zygotevol0.05) 
+
+UP8c_zygotehyp0.05 <- hypoxia_8c_vs_zygotevol0.05[hypoxia_8c_vs_zygotevol0.05$gene_type %in% "up",]
+DOWN8c_zygotehyp0.05 <- hypoxia_8c_vs_zygotevol0.05[hypoxia_8c_vs_zygotevol0.05$gene_type %in% "down",]
+TOT8c_zygotehyp0.05 <- rbind(UP8c_zygotehyp0.05, DOWN8c_zygotehyp0.05)
+TOT8c_zygotehyp0.05$Symbol<- rownames(TOT8c_zygotehyp0.05)
+
+cols <- c("down" = "#A67F7B", "up" = "#7B9FA6", "ns" = "grey")
+sizes <- c("up" = 4, "down" = 4, "ns" = 2)
+alphas <- c("up" = 2, "down" = 2, "ns" = 0.5) 
+
+hypoxia_8c_vs_zygotevolano0.05 <- ggplot(data = hypoxia_8c_vs_zygotevol0.05, aes(x=log2FoldChange, y=-log10(padj))
+) + geom_point (aes(fill = gene_type), shape = 21, size = 2, color = "black"
+) + geom_point(data = UP8c_zygotehyp0.05 , shape = 21, size = 4, fill = "#7B9FA6", colour = "black"
+) + geom_point(data = DOWN8c_zygotehyp0.05, shape = 21, size = 4, fill = "#A67F7B", colour = "black"
+) + geom_label_repel(data = TOT8c_zygotehyp0.05, aes(label = Symbol), force = 2,nudge_y = 1,
+) + scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas
+) + theme_bw() +
+  xlab("Expression change (log2FoldChange)")+
+  ylab("Significance (-log10(padj))")+
+  ggtitle(" Comparison of 8cell stage and zygote stage (hypoxia) ")+ 
+  xlim(-8, 8) +
+  ylim(0, 50)
+
+hypoxia_8c_vs_zygotevolano0.05
+ggsave(hypoxia_8c_vs_zygotevolano0.05, filename= "hypoxia_8c_vs_zygot(padj<0.05).pdf", width = 10, height = 10)
+ggsave(hypoxia_8c_vs_zygotevolano0.05, filename= "hypoxia_8c_vs_zygot(padj<0.05).svg", width = 10, height = 10)
+write.table(DOWN8c_zygotehyp0.05, file = "DOWN8c_zygotehyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+#volcano plot Main figure 3; 16-cell vs zygote
+hypoxia_16c_vs_zygotevol0.05 <- hypoxia_16c_vs_zygote %>% mutate(gene_type = case_when(log2FoldChange <= -1 & padj < 0.05 ~ "down", log2FoldChange >= 1 & padj < 0.05 ~ "up", TRUE ~ "ns"))
+hypoxia_16c_vs_zygotevol0.05$Symbol<- rownames(hypoxia_16c_vs_zygotevol0.05) 
+
+
+UP16c_zygotehyp0.05 <- hypoxia_16c_vs_zygotevol0.05[hypoxia_16c_vs_zygotevol0.05$gene_type %in% "up",]
+DOWN16c_zygotehyp0.05 <- hypoxia_16c_vs_zygotevol0.05[hypoxia_16c_vs_zygotevol0.05$gene_type %in% "down",]
+TOT16c_zygotehyp0.05 <- rbind(UP16c_zygotehyp0.05, DOWN16c_zygotehyp0.05)
+TOT16c_zygotehyp0.05$Symbol<- rownames(TOT16c_zygotehyp0.05)
+
+
+hypoxia_16c_vs_zygotevolano0.05 <- ggplot(data = hypoxia_16c_vs_zygotevol0.05, aes(x=log2FoldChange, y=-log10(padj))
+) + geom_point (aes(fill = gene_type), shape = 21, size = 2, color = "black"
+) + geom_point(data = UP16c_zygotehyp0.05 , shape = 21, size = 4, fill = "#7B9FA6", colour = "black"
+) + geom_point(data = DOWN16c_zygotehyp0.05, shape = 21, size = 4, fill = "#A67F7B", colour = "black"
+) + geom_label_repel(data = TOT16c_zygotehyp0.05, aes(label = Symbol), force = 2,nudge_y = 1,
+) + scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas
+) + theme_bw() +
+  xlab("Expression change (log2FoldChange)")+
+  ylab("Significance (-log10(padj))")+
+  ggtitle(" Comparison of 16cell stage and zygote stage (hypoxia)" ) + 
+  xlim(-8, 8) +
+  ylim(0, 50)
+
+hypoxia_16c_vs_zygotevolano0.05
+ggsave(hypoxia_16c_vs_zygotevolano0.05 , filename= "hypoxia_16c_vs_zygot(padj<0.05).pdf", width = 10, height = 10)
+ggsave(hypoxia_16c_vs_zygotevolano0.05 , filename= "hypoxia_16c_vs_zygot(padj<0.05).svg", width = 10, height = 10)
+write.table(DOWN16c_zygotehyp0.05, file = "DOWN16c_zygotehyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(UP16c_zygotehyp0.05, file = "UP16c_zygotehyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+#volcano plot Main figure 5; blastocyst vs zygote
+
+hypoxia_blast_vs_16cvol0.05 <- hypoxia_blas_vs_16c%>% mutate(gene_type = case_when(log2FoldChange <= -1 & padj < 0.05 ~ "down", log2FoldChange >= 1 & padj < 0.05 ~ "up", TRUE ~ "ns"))
+hypoxia_blast_vs_16cvol0.05$Symbol<- rownames(hypoxia_blast_vs_16cvol0.05) 
+
+UPbast_16chyp0.05 <- hypoxia_blast_vs_16cvol0.05[hypoxia_blast_vs_16cvol0.05$gene_type %in% "up",]
+DOWNblast_16chyp0.05 <- hypoxia_blast_vs_16cvol0.05[hypoxia_blast_vs_16cvol0.05$gene_type %in% "down",]
+TOTblast_16chyp0.05 <- rbind(UPbast_16chyp0.05, DOWNblast_16chyp0.05)
+TOTblast_16chyp0.05$Symbol<- rownames(TOTblast_16chyp0.05)
+
+hypoxia_blast_vs_16cvolano0.05 <- ggplot(data = hypoxia_blast_vs_16cvol0.05, aes(x=log2FoldChange, y=-log10(padj))
+) + geom_point (aes(fill = gene_type), shape = 21, size = 2, color = "black"
+) + geom_point(data = UPbast_16chyp0.05 , shape = 21, size = 4, fill = "#7B9FA6", colour = "black"
+) + geom_point(data = DOWNblast_16chyp0.05, shape = 21, size = 4, fill = "#A67F7B", colour = "black"
+) + geom_label_repel(data = TOTblast_16chyp0.05, aes(label = Symbol), force = 2,nudge_y = 1,
+) + scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas
+) + theme_bw() +
+  xlab("Expression change (log2FoldChange)")+
+  ylab("Significance (-log10(padj))")+
+  theme(legend.position = "none")+
+  xlim(-8, 8) +
+  ylim(0, 40)
+
+hypoxia_blast_vs_16cvolano0.05
+
+ggsave(hypoxia_blast_vs_16cvolano0.05, filename= "hypoxia_blastocyst_vs_16c(padj<0.05).pdf", width = 10, height = 10)
+ggsave(hypoxia_blast_vs_16cvolano0.05, filename= "hypoxia_blastocyst_vs_16c(padj<0.05).svg", width = 10, height = 10)
+write.table(DOWNblast_16chyp0.05, file = "DOWNblast_16chyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(UPbast_16chyp0.05, file = "UPbast_16chyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+```
+# Normoxia
+
+```{r}
+normoxia_8c_vs_zygote <- as.data.frame(results(dds1, contrast=c("Stage", "8cNO", "zNO")))
+normoxia_16c_vs_zygote <- as.data.frame(results(dds1, contrast=c("Stage", "16cNO", "zNO")))
+normoxia_blas_vs_16c <- as.data.frame(results(dds1, contrast=c("Stage", "bNO", "16cNO")))
+
+normoxia_8c_vs_zygote <- subset(normoxia_8c_vs_zygote, !is.na(padj) )
+normoxia_16c_vs_zygote <- subset(normoxia_16c_vs_zygote, !is.na(padj) )
+normoxia_blas_vs_16c <- subset(normoxia_blas_vs_16c, !is.na(padj) )
+
+# volcano plot Main figure 3; 8-cell vs zygote 
+
+normoxia_8c_vs_zygotevol0.05 <- normoxia_8c_vs_zygote %>% mutate(gene_type = case_when(log2FoldChange <= -1 & padj < 0.05 ~ "down", log2FoldChange >= 1 & padj < 0.05 ~ "up", TRUE ~ "ns"))
+normoxia_8c_vs_zygotevol0.05$Symbol<- rownames(normoxia_8c_vs_zygotevol0.05) 
+
+UP8c_zygotenorm0.05 <- normoxia_8c_vs_zygotevol0.05[normoxia_8c_vs_zygotevol0.05$gene_type %in% "up",]
+DOWN8c_zygotenorm0.05 <- normoxia_8c_vs_zygotevol0.05[normoxia_8c_vs_zygotevol0.05$gene_type %in% "down",]
+TOT8c_zygotenorm0.05<- rbind(UP8c_zygotenorm0.05, DOWN8c_zygotenorm0.05)
+TOT8c_zygotenorm0.05$Symbol<- rownames(TOT8c_zygotenorm0.05)
+
+
+normoxia_8c_vs_zygotevolano0.05 <- ggplot(data = normoxia_8c_vs_zygotevol0.05, aes(x=log2FoldChange, y=-log10(padj))
+) + geom_point (aes(fill = gene_type), shape = 21, size = 2, color = "black"
+) + geom_point(data = UP8c_zygotenorm0.05 , shape = 21, size = 4, fill = "#7B9FA6", colour = "black"
+) + geom_point(data = DOWN8c_zygotenorm0.05, shape = 21, size = 4, fill = "#A67F7B", colour = "black"
+) + geom_label_repel(data = TOT8c_zygotenorm0.05, aes(label = Symbol), force = 2,nudge_y = 1,
+) + scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas
+) + theme_bw() +
+  xlab("Expression change (log2FoldChange)")+
+  ylab("Significance (-log10(padj))")+
+  ggtitle(" Comparison of 8cell stage and zygote stage (normoxia) ")+ 
+  xlim(-8, 8) +
+  ylim(0, 50)
+
+normoxia_8c_vs_zygotevolano0.05
+ggsave(normoxia_8c_vs_zygotevolano0.05, filename= "normoxia_8c_vs_zygot(padj<0.05).pdf", width = 10, height = 10)
+ggsave(normoxia_8c_vs_zygotevolano0.05, filename= "normoxia_8c_vs_zygot(padj<0.05).svg", width = 10, height = 10)
+write.table(DOWN8c_zygotenorm0.05, file = "DOWN8c_zygotenorm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+# volcano plot Main figure 3; 16-cell vs zygote 
+
+normoxia_16c_vs_zygotevol0.05 <- normoxia_16c_vs_zygote %>% mutate(gene_type = case_when(log2FoldChange <= -1 & padj < 0.05 ~ "down", log2FoldChange >= 1 & padj < 0.05 ~ "up", TRUE ~ "ns"))
+normoxia_16c_vs_zygotevol0.05$Symbol<- rownames(normoxia_16c_vs_zygotevol0.05) 
+
+
+UP16c_zygotenorm0.05 <- normoxia_16c_vs_zygotevol0.05[normoxia_16c_vs_zygotevol0.05$gene_type %in% "up",]
+DOWN16c_zygotenorm0.05 <- normoxia_16c_vs_zygotevol0.05[normoxia_16c_vs_zygotevol0.05$gene_type %in% "down",]
+TOT16c_zygotenorm0.05 <- rbind(UP16c_zygotenorm0.05, DOWN16c_zygotenorm0.05)
+TOT16c_zygotenorm0.05$Symbol<- rownames(TOT16c_zygotenorm0.05)
+
+
+normoxia_16c_vs_zygotevolano0.05 <- ggplot(data = normoxia_16c_vs_zygotevol0.05, aes(x=log2FoldChange, y=-log10(padj))
+) + geom_point (aes(fill = gene_type), shape = 21, size = 2, color = "black"
+) + geom_point(data = UP16c_zygotenorm0.05, shape = 21, size = 4, fill = "#7B9FA6", colour = "black"
+) + geom_point(data = DOWN16c_zygotenorm0.05, shape = 21, size = 4, fill = "#A67F7B", colour = "black"
+) + geom_label_repel(data = TOT16c_zygotenorm0.05, aes(label = Symbol), force = 2,nudge_y = 1,
+) + scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas
+) + theme_bw() +
+  xlab("Expression change (log2FoldChange)")+
+  ylab("Significance (-log10(padj))")+
+  ggtitle(" Comparison of 16cell stage and zygote stage(normoxia)")+ 
+  xlim(-8, 8) +
+  ylim(0, 50)
+normoxia_16c_vs_zygotevolano0.05
+
+ggsave(normoxia_16c_vs_zygotevolano0.05 , filename= "normoxia_16c_vs_zygotevolano(padj<0.05).pdf", width = 10, height = 10)
+ggsave(normoxia_16c_vs_zygotevolano0.05 , filename= "normoxia_16c_vs_zygotevolano(padj<0.05).svg", width = 10, height = 10)
+write.table(DOWN16c_zygotenorm0.05, file = "DOWN16c_zygotenorm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(UP16c_zygotenorm0.05, file = "UP16c_zygotenorm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+# volcano plot Main figure 5; blastocyst vs 16-cell 
+
+normoxia_blas_vs_16cvol0.05 <- normoxia_blas_vs_16c %>% mutate(gene_type = case_when(log2FoldChange <= -1 & padj < 0.05 ~ "down", log2FoldChange >= 1 & padj < 0.05 ~ "up", TRUE ~ "ns"))
+normoxia_blas_vs_16cvol0.05$Symbol<- rownames(normoxia_blas_vs_16cvol0.05) 
+
+UPbast_16cnorm0.05 <- normoxia_blas_vs_16cvol0.05[normoxia_blas_vs_16cvol0.05$gene_type %in% "up",]
+DOWNblast_16cnorm0.05 <- normoxia_blas_vs_16cvol0.05[normoxia_blas_vs_16cvol0.05$gene_type %in% "down",]
+TOTblast_16cnorm0.05 <- rbind(UPbast_16cnorm0.05, DOWNblast_16cnorm0.05)
+TOTblast_16cnorm0.05$Symbol<- rownames(TOTblast_16cnorm0.05)
+
+normoxia_blastocyst_vs_16cvolano0.05 <- ggplot(data = normoxia_blas_vs_16cvol0.05, aes(x=log2FoldChange, y=-log10(padj))
+) + geom_point (aes(fill = gene_type), shape = 21, size = 2, color = "black"
+) + geom_point(data = UPbast_16cnorm0.05 , shape = 21, size = 4, fill = "#7B9FA6", colour = "black"
+) + geom_point(data = DOWNblast_16cnorm0.05, shape = 21, size = 4, fill = "#A67F7B", colour = "black"
+) + geom_label_repel(data = TOTblast_16cnorm0.05, aes(label = Symbol), force = 2,nudge_y = 1,
+) + scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas
+) + theme_bw()+
+  xlab("Expression change (log2FoldChange)")+
+  ylab("Significance (-log10(padj))")+
+  theme(legend.position = "none")+
+  xlim(-8, 8) +
+  ylim(0, 40)
+
+normoxia_blastocyst_vs_16cvolano0.05
+
+ggsave(normoxia_blastocyst_vs_16cvolano0.05 , filename= "normoxia_blastocyst_vs_16cvolano(padj<0.05).pdf", width = 10, height = 10)
+ggsave(normoxia_blastocyst_vs_16cvolano0.05 , filename= "normoxia_blastocyst_vs_16cvolano(padj<0.05).svg", width = 10, height = 10)
+write.table(DOWNblast_16cnorm0.05, file = "DOWNblast_16cnorm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(UPbast_16cnorm0.05, file = "UPbast_16cnorm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+```
+
+# Ultrahypoxia
+
+```{r}
+ultrahypoxia_blas_vs_HO16c <- as.data.frame(results(dds1, contrast=c("Stage", "bUHO", "16cHO")))
+ultrahypoxia_blas_vs_HO16c <- subset(ultrahypoxia_blas_vs_HO16c, !is.na(padj) )
+
+# volcano plot Main figure 5; blastocyst vs 16-cell 
+
+ultrahypoxia_blas_vs_HO16cvol0.05 <- ultrahypoxia_blas_vs_HO16c %>% mutate(gene_type = case_when(log2FoldChange <= -1 & padj < 0.05 ~ "down", log2FoldChange >= 1 & padj < 0.05 ~ "up", TRUE ~ "ns"))
+ultrahypoxia_blas_vs_HO16cvol0.05$Symbol<- rownames(ultrahypoxia_blas_vs_HO16cvol0.05) 
+
+UPbast_16cUHO_HO_0.05 <- ultrahypoxia_blas_vs_HO16cvol0.05[ultrahypoxia_blas_vs_HO16cvol0.05$gene_type %in% "up",]
+DOWNblast_16cUHO_HO_0.05 <- ultrahypoxia_blas_vs_HO16cvol0.05[ultrahypoxia_blas_vs_HO16cvol0.05$gene_type %in% "down",]
+TOTblast_16cUHO_HO_0.05 <- rbind(UPbast_16cUHO_HO_0.05, DOWNblast_16cUHO_HO_0.05)
+TOTblast_16cUHO_HO_0.05$Symbol<- rownames(TOTblast_16cUHO_HO_0.05)
+
+ultrahypoxia_blas_vs_HO16cvolano0.05 <- ggplot(data = ultrahypoxia_blas_vs_HO16cvol0.05, aes(x=log2FoldChange, y=-log10(padj))
+) + geom_point (aes(fill = gene_type), shape = 21, size = 2, color = "black"
+) + geom_point(data = UPbast_16cUHO_HO_0.05 , shape = 21, size = 4, fill = "#7B9FA6", colour = "black"
+) + geom_point(data = DOWNblast_16cUHO_HO_0.05, shape = 21, size = 4, fill = "#A67F7B", colour = "black"
+) + geom_label_repel(data = TOTblast_16cUHO_HO_0.05, aes(label = Symbol), force = 2,nudge_y = 1,
+) + scale_fill_manual(values = cols) + scale_alpha_manual(values = alphas
+) + theme_bw() +
+  xlab("Expression change (log2FoldChange)")+
+  ylab("Significance (-log10(padj))")+
+  theme(legend.position = "none")+
+  xlim(-8, 8) +
+  ylim(0, 40)
+
+ultrahypoxia_blas_vs_HO16cvolano0.05
+
+ggsave(ultrahypoxia_blas_vs_HO16cvolano0.05, filename= "UHO_blastocyst_vs_HO16c(padj<0.05).pdf", width = 10, height = 10)
+ggsave(ultrahypoxia_blas_vs_HO16cvolano0.05, filename= "UHO_blastocyst_vs_HO16c(padj<0.05).svg", width = 10, height = 10)
+write.table(UPbast_16cUHO_HO_0.05, file = "UPbast_16cUHO_HO_0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(DOWNblast_16cUHO_HO_0.05, file = "DOWNblast_16cUHO_HO_0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+```
+
+```{r}
+# Main figure 5
+figure5data <- data.frame(
+  Group = factor(rep(c("normoxia", "hypoxia", "ultrahypoxia"), each=2)),
+  Type = rep(c("Positive", "Negative"), 3),
+  Value = c(539, -663, 1991, -222, 1967, -1338))
+
+colourFig5<- c("normoxia" = "#F4E6AA", "hypoxia" = "#DEDBEE", "ultrahypoxia" = "#C8DBC8")
+# Create bar plot
+figure5<- ggplot(figure5data,aes(x=Group, y=Value, fill=Type)) +
+  geom_bar(stat="identity") +
+  geom_hline(yintercept=0, color="black") +
+  theme_minimal() +
+  labs(y="Number of DEG blastocyst vs 16C", x="Condition") +
+  geom_text(aes(label=Value), position=position_dodge(width=0.9), vjust=-0.3)
+
+ggsave(figure5, filename="DEGblast_16C.pdf", height = 10, width = 10)
+ggsave(figure5, filename="DEGblast_16C.svg", height = 10, width = 10)
+```
+
+# Kyoto Encyclopedia of Genes and Genomes (KEGG) and Gene Ontology (GO) analysis
+
+```{r}
+# Hypoxia 
+
+DOWN16c_hyp0.05<- rownames(DOWN16c_zygotehyp0.05)
+GO_DOWN16c_hyp0.05 <- enrichGO(gene = DOWN16c_hyp0.05, OrgDb = "org.Bt.eg.db", keyType = "SYMBOL", ont = "ALL")
+GO_DOWN16c_hyp0.05<-as.data.frame(GO_DOWN16c_hyp0.05)
+
+entrazDOWN16c_hyp0.05<- mapIds(org.Bt.eg.db, keys = DOWN16c_hyp0.05, column = "ENTREZID", keytype = "SYMBOL")
+keggDOWN16c_hyp0.05<- enrichKEGG(gene=entrazDOWN16c_hyp0.05, organism = "bta")
+keggDOWN16c_hyp0.05 <- as.data.frame(keggDOWN16c_hyp0.05)
+
+write.table(GO_DOWN16c_hyp0.05, file = "GO_DOWN16c_hyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(keggDOWN16c_hyp0.05, file = "keggDOWN16c_hyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+# Normoxia
+
+DOWN16c_norm0.05<- rownames(DOWN16c_zygotenorm0.05) 
+GO_DOWN16c_norm0.05<- enrichGO(gene = DOWN16c_norm0.05, OrgDb = "org.Bt.eg.db", keyType = "SYMBOL", ont = "ALL")
+GO_DOWN16c_norm0.05<-as.data.frame(GO_DOWN16c_norm0.05)
+
+UP16c_norm0.05<- rownames(UP16c_zygotenorm0.05) 
+GO_UP16c_norm0.05 <- enrichGO(gene = UP16c_norm0.05, OrgDb = "org.Bt.eg.db", keyType = "SYMBOL", ont = "ALL")
+GO_UP16c_norm0.05<-as.data.frame(GO_UP16c_norm0.05)
+
+entrazDOWN16c_norm0.05<- mapIds(org.Bt.eg.db, keys = DOWN16c_norm0.05, column = "ENTREZID", keytype = "SYMBOL")
+keggDOWN16c_norm0.05<- enrichKEGG(gene=entrazDOWN16c_norm0.05, organism = "bta")
+keggDOWN16c_norm0.05 <- as.data.frame(keggDOWN16c_norm0.05)
+
+entrazUP16c_norm0.05<- mapIds(org.Bt.eg.db, keys = UP16c_norm0.05, column = "ENTREZID", keytype = "SYMBOL")
+keggUP16c_norm0.05<- enrichKEGG(gene=entrazUP16c_norm0.05, organism = "bta")
+keggUP16c_norm0.05 <- as.data.frame(keggUP16c_norm0.05)
+
+write.table(GO_DOWN16c_norm0.05, file = "GO_DOWN16c_norm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(GO_UP16c_norm0.05, file = "GO_UP16c_norm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(keggDOWN16c_norm0.05, file = "keggDOWN16c_norm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+write.table(keggUP16c_norm0.05, file = "keggUP16c_norm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+# Visual presentations, figure 4
+
+GO_UP16c_hyp<-read.table("gprofiler16chypUP.txt", header = TRUE, sep = "\t", fill = TRUE)
+
+hyp16UP <- ggplot(GO_UP16c_hyp, aes(x=Gene, y=GO_Tterm)) +
+  geom_bar(stat="identity", fill="#DEDBEE") +
+  labs(x="Gene", y="") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(size=rel(2)),
+        axis.title = element_text(size=rel(2)),
+        axis.text.y = element_text(size=rel(2)))+
+   xlim(0, 180)
+
+ggsave(hyp16UP, filename= "hyp16UP_GO.svg", width = 20, height = 10)
+
+GO_UP16c_norm<-read.table("GO_UP16c_norm.txt", header = TRUE, sep = "\t", fill = TRUE)
+
+norm16UP <- ggplot(GO_UP16c_norm, aes(x=Count, y=GO_term)) +
+  geom_bar(stat="identity", fill="#F4E6AA") +
+  labs(x="Gene", y="") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(size=rel(2)),
+        axis.title = element_text(size=rel(2)),
+        axis.text.y = element_text(size=rel(2)))+
+  xlim(0, 170)
+
+ggsave(norm16UP, filename= "norm16UP_GO.svg", height = 8, width = 10)
+
+kegg_DOWN16c_hyponly<-read.table("keggDOWN16c_HO_only.txt", header = TRUE, sep = "\t", fill = TRUE)
+hyp16down <- ggplot(kegg_DOWN16c_hyponly, aes(x=Count, y=Description)) +
+  geom_bar(stat="identity", fill="#DEDBEE") +
+  labs(x="Gene", y="") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(size=rel(2)),
+        axis.title = element_text(size=rel(2)),
+        axis.text.y = element_text(size=rel(2)))
+ggsave(hyp16down, filename= "hyp16down.svg", height = 8, width = 10)
+
+kegg_DOWN16c_normonly<-read.table("keggDOWN16c_norm_only.txt", header = TRUE, sep = "\t", fill = TRUE)
+norm16down <- ggplot(kegg_DOWN16c_normonly, aes(x=Count, y=Description)) +
+  geom_bar(stat="identity", fill="#F4E6AA") +
+  labs(x="Gene", y="") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(size=rel(2)),
+        axis.title = element_text(size=rel(2)),
+        axis.text.y = element_text(size=rel(2)))
+ggsave(norm16down, filename= "norm16down.svg", height = 8, width = 10)
+
+```
+
+# Supplementary figure 3 and 4
+
+```{r}
+# Top 40 downregulated KEGG pathways at 16C in hypoxia and normoxia
+
+top40_DOWN16C_norm<- keggDOWN16c_norm0.05[1:40,]
+top40_DOWN16C_hyp<- keggDOWN16c_hyp0.05[1:40,]
+
+
+mypalette <- brewer.pal(3, "YlOrRd")
+
+keggDOWN16CHYP<- ggplot(top40_DOWN16C_hyp)+
+  geom_point(aes(x = Count, y = Description, color = -log10(p.adjust)), 
+             size = 2) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=rel(1.15)),
+        axis.title = element_text(size=rel(1.15))) +
+  xlab("Gene count") +
+  ylab("KEGG pathways") +
+  ggtitle("Top 40 downregulated KEGG pathways at 16C in hypoxia") +
+  theme(plot.title = element_text(hjust=0.5, 
+  	face = "bold")) +
+  scale_color_gradientn(name = "Significance \n (-log10(padj))", colors = mypalette ) +
+  theme(legend.title = element_text(size=rel(1.15),
+	hjust=0.5, 
+	face="bold")) +
+    xlim(0, 170)
+
+keggDOWN16CHYP
+
+ggsave(keggDOWN16CHYP, filename="keggDOWN16CHYP.pdf", height = 10, width = 10)
+
+keggDOWN16Cnorm<- ggplot(top40_DOWN16C_norm)+
+  geom_point(aes(x = Count, y = Description, color = -log10(p.adjust)), 
+             size = 2) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=rel(1.15)),
+        axis.title = element_text(size=rel(1.15))) +
+  xlab("Gene count") +
+  ylab("KEGG pathways") +
+  ggtitle("Top 40 downregulated KEGG pathways at 16C in normoxia") +
+  theme(plot.title = element_text(hjust=0.5, 
+  	face = "bold")) +
+  scale_color_gradientn(name = "Significance \n (-log10(padj))", colors = mypalette ) +
+  theme(legend.title = element_text(size=rel(1.15),
+	hjust=0.5, 
+	face="bold")) +
+    xlim(0, 130)
+keggDOWN16Cnorm
+
+ggsave(keggDOWN16Cnorm, filename="keggDOWN16Cnorm.pdf", height = 10, width = 10)
+```
+
+# KEGG analysis of upregulated genes at blastocyst vs 16C
+
+```{r}
+# Hypoxia
+
+UPblast_16chyp0.05<- rownames(UPbast_16chyp0.05)
+entrazUPblast_16chyp0.05<- mapIds(org.Bt.eg.db, keys = UPblast_16chyp0.05, column = "ENTREZID", keytype = "SYMBOL")
+keggUPblast_16chyp0.05<- enrichKEGG(gene=entrazUPblast_16chyp0.05, organism = "bta")
+keggUPblast_16chyp0.05 <- as.data.frame(keggUPblast_16chyp0.05)
+write.table(keggUPblast_16chyp0.05, file = "keggUPblast_16chyp0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+
+# Normoxia
+
+UPblast_16cnorm0.05 <- rownames(UPbast_16cnorm0.05) 
+entrazUPblast_16cnorm0.05<- mapIds(org.Bt.eg.db, keys = UPblast_16cnorm0.05, column = "ENTREZID", keytype = "SYMBOL")
+keggUPblast_16cnorm0.05<- enrichKEGG(gene=entrazUPblast_16cnorm0.05, organism = "bta")
+keggUPblast_16cnorm0.05 <- as.data.frame(keggUPblast_16cnorm0.05)
+write.table(keggUPblast_16cnorm0.05, file = "keggUPblast_16cnorm0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+# Ultrahypoxia
+
+UPblast_16cUHO_HO_0.05<- rownames(UPbast_16cUHO_HO_0.05) 
+entrazUPblast_16cUHO_HO_0.05<- mapIds(org.Bt.eg.db, keys = UPblast_16cUHO_HO_0.05, column = "ENTREZID", keytype = "SYMBOL")
+keggUPblast_16cUHO_HO_0.05<- enrichKEGG(gene=entrazUPblast_16cUHO_HO_0.05, organism = "bta")
+keggUPblast_16cUHO_HO_0.05 <- as.data.frame(keggUPblast_16cUHO_HO_0.05)
+write.table(keggUPblast_16cUHO_HO_0.05, file = "keggUPblast_16cUHO_HO_0.05.txt", sep = "\t", row.names = T, col.names = TRUE)
+```
+
+# Chord diagram, main figure 5
+
+```{r}
+
+shared_all <- Reduce(intersect, list(keggUPblast_16chyp0.05$Description, keggUPblast_16cUHO_HO_0.05$Description, keggUPblast_16cnorm0.05$Description ))
+shared_HO_UHO <- setdiff(intersect(keggUPblast_16chyp0.05$Description, keggUPblast_16cUHO_HO_0.05$Description), shared_all)
+unique_HO <- setdiff(keggUPblast_16chyp0.05$Description, union(keggUPblast_16cUHO_HO_0.05$Description, keggUPblast_16cnorm0.05$Description))
+unique_UHO <- setdiff(keggUPblast_16cUHO_HO_0.05$Description, union(keggUPblast_16chyp0.05$Description, keggUPblast_16cnorm0.05$Description))
+unique_NO <- setdiff(keggUPblast_16cnorm0.05$Description, union(keggUPblast_16chyp0.05$Description, keggUPblast_16cUHO_HO_0.05$Description))
+
+# Create the new data frame
+df_combined_allUPkeggblast <- data.frame(
+  Description = c(shared_all, shared_HO_UHO, unique_HO, unique_UHO, unique_NO),
+  Condition = c(rep("Shared_All", length(shared_all)), 
+                rep("HO/UHO", length(shared_HO_UHO)), 
+                rep("HO", length(unique_HO)), 
+                rep("UHO", length(unique_UHO)), 
+                rep("NO", length(unique_NO)))
+)
+
+rownames(df_combined_allUPkeggblast)<- df_combined_allUPkeggblast$Description
+write.table(df_combined_allUPkeggblast, file = "df_combined_allUPkeggblastno26.txt", sep = "\t", row.names = T, col.names = TRUE)
+
+library(circlize)
+circos.clear()
+chordDiagram(df_combined_allUPkeggblast, grid.col = colourFig5, annotationTrack = "grid", 
+         preAllocateTracks = list(track.height = 0.3))
+
+
+```
+```{r}
+sessionInfo()
+```
+
